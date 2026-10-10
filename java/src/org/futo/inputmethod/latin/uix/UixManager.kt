@@ -966,7 +966,7 @@ class UixManager(private val latinIME: LatinIME) {
             // This is a key popup, not a dialog: retain the keyboard's original finger.
             isTouchable = false
             isOutsideTouchable = false
-            isLaidOutInScreen = true
+            setIsLaidOutInScreen(true)
             setBackgroundDrawable(ColorDrawable(android.graphics.Color.TRANSPARENT))
             elevation = 12 * density
             setOnDismissListener {
