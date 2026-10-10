@@ -101,6 +101,13 @@ public interface KeyboardActionListener {
      */
     public boolean onCustomRequest(int requestCode);
 
+    default boolean onStartLanguageSwitchGesture() {
+        return onCustomRequest(Constants.CUSTOM_CODE_SHOW_INPUT_METHOD_PICKER);
+    }
+
+    /** Coordinates are relative to the main keyboard view. */
+    default void onLanguageSwitchGesture(int action, int x, int y) {}
+
     public void onMovePointer(int steps);
     public void onMoveDeletePointer(int steps);
     public void onUpWithDeletePointerActive();

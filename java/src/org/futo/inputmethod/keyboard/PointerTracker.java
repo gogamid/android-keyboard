@@ -144,6 +144,7 @@ public final class PointerTracker implements PointerTrackerQueue.Element,
     // Last pointer position.
     private int mLastX;
     private int mLastY;
+    private boolean mLanguageSwitchGesture;
 
     private boolean mIsFlickingKey;
 
@@ -229,6 +230,10 @@ public final class PointerTracker implements PointerTrackerQueue.Element,
     }
 
     public static void cancelAllPointerTrackers() {
+        // Picker fingers have already been removed from the normal key queue.
+        for (PointerTracker tracker : sTrackers) {
+            tracker.cancelLanguageSwitchGesture();
+        }
         sPointerTrackerQueue.cancelAllPointerTrackers();
     }
 
@@ -720,6 +725,7 @@ public final class PointerTracker implements PointerTrackerQueue.Element,
     }
 
     private void onDownEventInternal(final int x, final int y, final long eventTime) {
+        cancelLanguageSwitchGesture();
         Key key = onDownKey(x, y, eventTime);
         // Key selection by dragging finger is allowed when 1) key selection by dragging finger is
         // enabled by configuration, 2) this pointer starts dragging from modifier key, or 3) this
@@ -814,6 +820,10 @@ public final class PointerTracker implements PointerTrackerQueue.Element,
     }
 
     private void onMoveEvent(final int x, final int y, final long eventTime, final MotionEvent me) {
+        if (mLanguageSwitchGesture) {
+            sListener.onLanguageSwitchGesture(MotionEvent.ACTION_MOVE, x, y);
+            return;
+        }
         if (DEBUG_MOVE_EVENT) {
             printTouchEvent("onMoveEvent:", x, y, eventTime);
         }
@@ -1110,6 +1120,10 @@ public final class PointerTracker implements PointerTrackerQueue.Element,
     }
 
     private void onUpEventInternal(final int x, final int y, final long eventTime) {
+        if (mLanguageSwitchGesture) {
+            mLanguageSwitchGesture = false;
+            sListener.onLanguageSwitchGesture(MotionEvent.ACTION_UP, x, y);
+        }
         // Update the key if the layout has changed
         if(mKeyboardLayoutHasBeenChanged
                 && mCurrentKey != null
@@ -1244,9 +1258,10 @@ public final class PointerTracker implements PointerTrackerQueue.Element,
                 return;
             }
 
-            // Long pressing the space key invokes IME switcher dialog.
-            if (sListener.onCustomRequest(Constants.CUSTOM_CODE_SHOW_INPUT_METHOD_PICKER)) {
+            // Keep routing this finger to the picker after normal key tracking stops.
+            if (sListener.onStartLanguageSwitchGesture()) {
                 cancelKeyTracking();
+                mLanguageSwitchGesture = true;
                 sListener.onReleaseKey(code, false /* withSliding */);
                 return;
             }
@@ -1291,7 +1306,15 @@ public final class PointerTracker implements PointerTrackerQueue.Element,
         onCancelEventInternal();
     }
 
+    private void cancelLanguageSwitchGesture() {
+        if (mLanguageSwitchGesture) {
+            mLanguageSwitchGesture = false;
+            sListener.onLanguageSwitchGesture(MotionEvent.ACTION_CANCEL, mLastX, mLastY);
+        }
+    }
+
     private void onCancelEventInternal() {
+        cancelLanguageSwitchGesture();
         sTimerProxy.cancelKeyTimersOf(this);
         setReleasedKeyGraphics(mCurrentKey, true /* withAnimation */);
         resetKeySelectionByDraggingFinger();

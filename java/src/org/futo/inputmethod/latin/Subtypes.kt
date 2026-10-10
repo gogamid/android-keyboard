@@ -10,6 +10,7 @@ import android.view.inputmethod.InputMethodSubtype
 import android.view.inputmethod.InputMethodSubtype.InputMethodSubtypeBuilder
 import android.widget.Toast
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LocalContentColor
@@ -28,7 +30,13 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.res.painterResource
@@ -40,6 +48,8 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import org.futo.inputmethod.latin.common.Constants
 import org.futo.inputmethod.latin.uix.SettingsKey
+import org.futo.inputmethod.latin.uix.LanguageSwitchGesture
+import kotlinx.coroutines.delay
 import org.futo.inputmethod.latin.uix.getSetting
 import org.futo.inputmethod.latin.uix.getSettingBlocking
 import org.futo.inputmethod.latin.uix.isDirectBootUnlocked
@@ -405,10 +415,46 @@ object Subtypes {
 @Preview
 fun LanguageSwitcherDialog(
     onDismiss: () -> Unit = { },
-    switchToIme: (InputMethodInfo) -> Unit = { }
+    switchToIme: (InputMethodInfo) -> Unit = { },
+    gesture: LanguageSwitchGesture? = null
 ) {
     val inspection = LocalInspectionMode.current
     val context = LocalContext.current
+    val view = LocalView.current
+    val listState = rememberLazyListState()
+    val listBounds = remember { androidx.compose.runtime.mutableStateOf<Rect?>(null) }
+
+    fun screenBounds(bounds: Rect): Rect {
+        val screen = IntArray(2)
+        val window = IntArray(2)
+        view.getLocationOnScreen(screen)
+        view.getLocationInWindow(window)
+        return bounds.translate(
+            androidx.compose.ui.geometry.Offset(
+                (screen[0] - window[0]).toFloat(), (screen[1] - window[1]).toFloat()
+            )
+        )
+    }
+
+    // Holding near a list edge reveals languages beyond the visible rows.
+    LaunchedEffect(gesture, gesture?.pointer?.value) {
+        val pointer = gesture?.pointer?.value ?: return@LaunchedEffect
+        val bounds = listBounds.value ?: return@LaunchedEffect
+        val edge = 40 * context.resources.displayMetrics.density
+        val direction = when {
+            !bounds.contains(pointer) -> 0
+            pointer.y < bounds.top + edge -> -1
+            pointer.y > bounds.bottom - edge -> 1
+            else -> 0
+        }
+        if (direction != 0) {
+            while (true) {
+                listState.scroll { scrollBy(direction * edge / 4) }
+                gesture.handle(android.view.MotionEvent.ACTION_MOVE, pointer.x.toInt(), pointer.y.toInt())
+                delay(32)
+            }
+        }
+    }
     val subtypeSet = if(inspection) {
         setOf("en_US:", "pt_PT:KeyboardLayoutSet=portugues:", "lt:", "fr:KeyboardLayoutSet=bepo:")
     } else {
@@ -455,7 +501,9 @@ fun LanguageSwitcherDialog(
                     .padding(0.dp, 16.dp)
             )
 
-            LazyColumn(modifier = Modifier.weight(1.0f)) {
+            LazyColumn(state = listState, modifier = Modifier.weight(1.0f).onGloballyPositioned {
+                listBounds.value = screenBounds(it.boundsInWindow())
+            }) {
                 items(keys) { locale ->
                     subtypes[locale]!!.forEach { subtype ->
                         val layoutSetName = subtype.getExtraValueOf(Constants.Subtype.ExtraValue.KEYBOARD_LAYOUT_SET) ?: ""
@@ -463,29 +511,41 @@ fun LanguageSwitcherDialog(
                         val layout = if(inspection) { layoutSetName } else { Subtypes.getLayoutName(context, layoutSetName) }
                         val title = if(inspection) { subtype.locale } else { Subtypes.getName(subtype) }
 
-                        val selected = activeSubtype == Subtypes.subtypeToString(subtype)
+                        val subtypeId = Subtypes.subtypeToString(subtype)
+                        val selected = (gesture?.highlightedSubtype?.value ?: activeSubtype) == subtypeId
+                        val select = {
+                            context.setSettingBlocking(ActiveSubtype.key, subtypeId)
+                            onDismiss()
+                        }
+                        DisposableEffect(gesture, subtypeId) {
+                            onDispose { gesture?.removeRow(subtypeId) }
+                        }
 
                         val item = @Composable {
                             NavigationItem(
                                 title = title,
                                 subtitle = layout.ifBlank { null },
                                 style = NavigationItemStyle.MiscNoArrow,
-                                navigate = {
-                                    context.setSettingBlocking(ActiveSubtype.key, Subtypes.subtypeToString(subtype))
-                                    onDismiss()
-                                },
+                                navigate = select,
                                 icon = if(selected) painterResource(R.drawable.check_circle) else painterResource(R.drawable.circle)
                             )
                         }
 
-                        if (selected) {
-                            Surface(color = MaterialTheme.colorScheme.primary) {
-                                CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onPrimary) {
-                                    item()
+                        Box(Modifier.onGloballyPositioned {
+                            val bounds = screenBounds(it.boundsInWindow())
+                            val visibleBounds = listBounds.value?.let { list -> bounds.intersect(list) }
+                                ?: bounds
+                            gesture?.registerRow(subtypeId, visibleBounds, select)
+                        }) {
+                            if (selected) {
+                                Surface(color = MaterialTheme.colorScheme.primary) {
+                                    CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onPrimary) {
+                                        item()
+                                    }
                                 }
+                            } else {
+                                item()
                             }
-                        } else {
-                            item()
                         }
                     }
                 }

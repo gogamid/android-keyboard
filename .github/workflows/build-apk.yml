@@ -1,0 +1,43 @@
+name: Build gesture APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [spacebar-language-gesture]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          lfs: true
+      - name: Fetch submodule LFS assets
+        run: git submodule foreach --recursive 'git lfs pull'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install native build tools
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'ndk;28.2.13676358' 'cmake;3.22.1'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Build and test
+        run: ./gradlew assembleUnstableDebug testUnstableDebugUnitTest --stacktrace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: futo-keyboard-spacebar-gesture
+          path: build/outputs/apk/unstable/debug/*.apk
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unit-test-results
+          path: build/reports/tests/
+          if-no-files-found: ignore

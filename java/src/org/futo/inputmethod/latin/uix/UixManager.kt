@@ -930,15 +930,42 @@ class UixManager(private val latinIME: LatinIME) {
     }
 
     private var languageSwitcherDialog: DialogComposeView? = null
-    fun showLanguageSwitcher() {
+    private var languageSwitchGesture: LanguageSwitchGesture? = null
+
+    fun onLanguageSwitchGesture(action: Int, x: Int, y: Int) {
+        val gesture = languageSwitchGesture ?: return
+        val selected = gesture.handle(action, x, y)
+        if (action == android.view.MotionEvent.ACTION_CANCEL) {
+            languageSwitcherDialog?.dismiss()
+        } else if (action == android.view.MotionEvent.ACTION_UP) {
+            if (!selected) {
+                // A stationary long press keeps the original tap-to-select behavior.
+                languageSwitcherDialog?.dialog?.window?.clearFlags(
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                )
+            }
+            languageSwitchGesture = null
+            gesture.highlightedSubtype.value = null
+        }
+    }
+
+    @JvmOverloads
+    fun showLanguageSwitcher(withGesture: Boolean = false) {
         // Dismiss old dialog
         languageSwitcherDialog?.dismiss()
+        val gesture = if (withGesture) LanguageSwitchGesture() else null
+        languageSwitchGesture = gesture
 
         // Create new dialog
-        languageSwitcherDialog = createDialogComposeView(latinIME) { dialog ->
+        languageSwitcherDialog = createDialogComposeView(
+            latinIME,
+            onDismiss = { languageSwitchGesture = null }
+        ) { dialog ->
             DataStoreCacheProvider {
                 UixThemeAuto {
                     LanguageSwitcherDialog(
+                        gesture = gesture,
                         onDismiss = { dialog.dismiss() },
                         switchToIme = {
                             latinIME.lifecycleScope.launch(Dispatchers.Main) {
@@ -951,6 +978,13 @@ class UixManager(private val latinIME: LatinIME) {
             }
         }
 
+        if (withGesture) {
+            // Do not steal/cancel the touch stream already owned by the keyboard window.
+            languageSwitcherDialog?.dialog?.window?.addFlags(
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+            )
+        }
         languageSwitcherDialog?.show()
     }
 
@@ -1718,5 +1752,4 @@ class UixManager(private val latinIME: LatinIME) {
     val extraTopTouchHeight: Int
         get() = if(floatingPreeditShown) floatingPreeditHeight.value else 0
 }
-
 
