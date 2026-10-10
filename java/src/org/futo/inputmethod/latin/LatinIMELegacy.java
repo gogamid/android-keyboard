@@ -615,9 +615,12 @@ public class LatinIMELegacy implements KeyboardActionListener,
     }
 
     @Override
-    public boolean onStartLanguageSwitchGesture() {
+    public boolean onStartLanguageSwitchGesture(int x, int y) {
         if (!canDoLanguageSwitch()) return false;
-        getLatinIME().getUixManager().showLanguageSwitcher(true);
+        final int[] location = new int[2];
+        mKeyboardSwitcher.getMainKeyboardView().getLocationOnScreen(location);
+        getLatinIME().getUixManager().showLanguageSwitchPopup(
+                x + location[0], y + location[1]);
         return true;
     }
 

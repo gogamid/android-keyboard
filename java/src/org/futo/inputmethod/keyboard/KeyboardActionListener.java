@@ -101,7 +101,7 @@ public interface KeyboardActionListener {
      */
     public boolean onCustomRequest(int requestCode);
 
-    default boolean onStartLanguageSwitchGesture() {
+    default boolean onStartLanguageSwitchGesture(int x, int y) {
         return onCustomRequest(Constants.CUSTOM_CODE_SHOW_INPUT_METHOD_PICKER);
     }
 

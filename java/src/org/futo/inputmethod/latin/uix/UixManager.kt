@@ -6,18 +6,21 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Rect
 import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.util.Log
 import android.view.KeyEvent
+import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InlineSuggestionsResponse
 import android.view.inputmethod.InputConnection
 import android.widget.Toast
+import android.widget.PopupWindow
 import androidx.annotation.RequiresApi
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -96,6 +99,8 @@ import androidx.core.view.inputmethod.InputConnectionCompat
 import androidx.core.view.inputmethod.InputContentInfoCompat
 import androidx.lifecycle.LifecycleCoroutineScope
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.setViewTreeLifecycleOwner
+import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import androidx.navigation.NavHostController
 import androidx.window.layout.FoldingFeature
 import androidx.window.layout.WindowInfoTracker
@@ -114,6 +119,7 @@ import org.futo.inputmethod.latin.LanguageSwitcherDialog
 import org.futo.inputmethod.latin.LatinIME
 import org.futo.inputmethod.latin.R
 import org.futo.inputmethod.latin.RichInputMethodManager
+import org.futo.inputmethod.latin.SubtypesSetting
 import org.futo.inputmethod.latin.SuggestedWords
 import org.futo.inputmethod.latin.SuggestedWords.SuggestedWordInfo
 import org.futo.inputmethod.latin.SupportsNavbarExtension
@@ -930,32 +936,86 @@ class UixManager(private val latinIME: LatinIME) {
     }
 
     private var languageSwitcherDialog: DialogComposeView? = null
+    private var languageSwitcherPopup: PopupWindow? = null
     private var languageSwitchGesture: LanguageSwitchGesture? = null
+
+    private fun dismissLanguageSwitcher() {
+        languageSwitcherDialog?.dismiss()
+        languageSwitcherPopup?.dismiss()
+        languageSwitcherDialog = null
+        languageSwitcherPopup = null
+        languageSwitchGesture = null
+    }
+
+    fun showLanguageSwitchPopup(anchorX: Int, anchorY: Int) {
+        dismissLanguageSwitcher()
+        val keyboard = latinIME.latinIMELegacy.mKeyboardSwitcher.mainKeyboardView
+        val metrics = latinIME.resources.displayMetrics
+        val density = metrics.density
+        val width = (280 * density).toInt().coerceAtMost(metrics.widthPixels)
+        val languageCount = latinIME.getSettingBlocking(SubtypesSetting).size.coerceAtLeast(1)
+        val height = ((48 + 72 * languageCount.coerceAtMost(4)) * density).toInt()
+            .coerceAtMost((anchorY - 24 * density).toInt().coerceAtLeast(1))
+        val gesture = LanguageSwitchGesture()
+        languageSwitchGesture = gesture
+        val content = ComposeView(latinIME).apply {
+            setViewTreeLifecycleOwner(latinIME)
+            setViewTreeSavedStateRegistryOwner(latinIME)
+        }
+        val popup = PopupWindow(content, width, height, false).apply {
+            // This is a key popup, not a dialog: retain the keyboard's original finger.
+            isTouchable = false
+            isOutsideTouchable = false
+            isLaidOutInScreen = true
+            setBackgroundDrawable(ColorDrawable(android.graphics.Color.TRANSPARENT))
+            elevation = 12 * density
+            setOnDismissListener {
+                languageSwitchGesture = null
+                content.disposeComposition()
+            }
+        }
+        languageSwitcherPopup = popup
+        content.setContent {
+            DataStoreCacheProvider {
+                UixThemeAuto {
+                    LanguageSwitcherDialog(
+                        gesture = gesture,
+                        compact = true,
+                        onDismiss = { popup.dismiss() }
+                    )
+                }
+            }
+        }
+        popup.showAtLocation(
+            keyboard,
+            Gravity.TOP or Gravity.LEFT,
+            (anchorX - width / 2).coerceIn(0, metrics.widthPixels - width),
+            anchorY - height
+        )
+    }
 
     fun onLanguageSwitchGesture(action: Int, x: Int, y: Int) {
         val gesture = languageSwitchGesture ?: return
         val selected = gesture.handle(action, x, y)
         if (action == android.view.MotionEvent.ACTION_CANCEL) {
-            languageSwitcherDialog?.dismiss()
+            dismissLanguageSwitcher()
         } else if (action == android.view.MotionEvent.ACTION_UP) {
             if (!selected) {
                 // A stationary long press keeps the original tap-to-select behavior.
-                languageSwitcherDialog?.dialog?.window?.clearFlags(
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-                )
+                languageSwitcherPopup?.apply {
+                    isTouchable = true
+                    isOutsideTouchable = true
+                    update()
+                }
             }
             languageSwitchGesture = null
             gesture.highlightedSubtype.value = null
         }
     }
 
-    @JvmOverloads
-    fun showLanguageSwitcher(withGesture: Boolean = false) {
+    fun showLanguageSwitcher() {
         // Dismiss old dialog
-        languageSwitcherDialog?.dismiss()
-        val gesture = if (withGesture) LanguageSwitchGesture() else null
-        languageSwitchGesture = gesture
+        dismissLanguageSwitcher()
 
         // Create new dialog
         languageSwitcherDialog = createDialogComposeView(
@@ -965,7 +1025,6 @@ class UixManager(private val latinIME: LatinIME) {
             DataStoreCacheProvider {
                 UixThemeAuto {
                     LanguageSwitcherDialog(
-                        gesture = gesture,
                         onDismiss = { dialog.dismiss() },
                         switchToIme = {
                             latinIME.lifecycleScope.launch(Dispatchers.Main) {
@@ -978,13 +1037,6 @@ class UixManager(private val latinIME: LatinIME) {
             }
         }
 
-        if (withGesture) {
-            // Do not steal/cancel the touch stream already owned by the keyboard window.
-            languageSwitcherDialog?.dialog?.window?.addFlags(
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-            )
-        }
         languageSwitcherDialog?.show()
     }
 
@@ -1670,7 +1722,7 @@ class UixManager(private val latinIME: LatinIME) {
 
     fun onInputFinishing() {
         closeActionWindow()
-        languageSwitcherDialog?.dismiss()
+        dismissLanguageSwitcher()
         isShowingActionEditor.value = false
         resizers.hideResizer()
         inlineSuggestions.value = emptyList()
@@ -1752,4 +1804,3 @@ class UixManager(private val latinIME: LatinIME) {
     val extraTopTouchHeight: Int
         get() = if(floatingPreeditShown) floatingPreeditHeight.value else 0
 }
-

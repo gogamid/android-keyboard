@@ -1259,7 +1259,7 @@ public final class PointerTracker implements PointerTrackerQueue.Element,
             }
 
             // Keep routing this finger to the picker after normal key tracking stops.
-            if (sListener.onStartLanguageSwitchGesture()) {
+            if (sListener.onStartLanguageSwitchGesture(mLastX, key.getY())) {
                 cancelKeyTracking();
                 mLanguageSwitchGesture = true;
                 sListener.onReleaseKey(code, false /* withSliding */);

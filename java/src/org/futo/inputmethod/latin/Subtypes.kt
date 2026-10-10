@@ -416,7 +416,8 @@ object Subtypes {
 fun LanguageSwitcherDialog(
     onDismiss: () -> Unit = { },
     switchToIme: (InputMethodInfo) -> Unit = { },
-    gesture: LanguageSwitchGesture? = null
+    gesture: LanguageSwitchGesture? = null,
+    compact: Boolean = false
 ) {
     val inspection = LocalInspectionMode.current
     val context = LocalContext.current
@@ -473,7 +474,9 @@ fun LanguageSwitcherDialog(
         useDataStoreValue(ActiveSubtype)
     }
 
-    val activeIMEs = if(LocalInspectionMode.current) {
+    val activeIMEs = if (compact) {
+        emptyList()
+    } else if(LocalInspectionMode.current) {
         listOf(
             InputMethodInfo("com.example.Keyboard", ".Keyboard", "Joe's Keyboard", ""),
             InputMethodInfo("com.example.Keyboard", ".Keyboard", "Example Keyboard", ""),
@@ -489,16 +492,16 @@ fun LanguageSwitcherDialog(
         }
     }
 
-    Surface(shape = RoundedCornerShape(48.dp), color = MaterialTheme.colorScheme.background) {
+    Surface(shape = RoundedCornerShape(if (compact) 16.dp else 48.dp), color = MaterialTheme.colorScheme.background) {
         Column {
-            Spacer(modifier = Modifier.height(16.dp))
+            if (!compact) Spacer(modifier = Modifier.height(16.dp))
             Text(
                 stringResource(R.string.select_language),
                 textAlign = TextAlign.Center,
                 style = Typography.Heading.MediumMl,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(0.dp, 16.dp)
+                    .padding(0.dp, if (compact) 8.dp else 16.dp)
             )
 
             LazyColumn(state = listState, modifier = Modifier.weight(1.0f).onGloballyPositioned {
@@ -577,7 +580,7 @@ fun LanguageSwitcherDialog(
                 }
             }
 
-            Row(modifier = Modifier.height(64.dp)) {
+            if (!compact) Row(modifier = Modifier.height(64.dp)) {
                 Spacer(modifier = Modifier.weight(1.0f))
                 TextButton(onClick = {
                     val inputMethodManager =
